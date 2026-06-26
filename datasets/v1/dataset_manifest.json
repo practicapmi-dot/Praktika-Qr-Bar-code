@@ -1,0 +1,47 @@
+{
+  "version_tag": "v1",
+  "created": "2026-06-26T19:27:40",
+  "source": "datasets/raw/barcode_qr",
+  "seed": 0,
+  "ratios": {
+    "train": 0.8,
+    "val": 0.1,
+    "test": 0.1
+  },
+  "dedup": true,
+  "classes": {
+    "0": "qr",
+    "1": "barcode_1d",
+    "2": "datamatrix",
+    "3": "pdf417",
+    "4": "aztec"
+  },
+  "totals": {
+    "images": 952,
+    "xml_seen": 952
+  },
+  "per_split_images": {
+    "train": 761,
+    "val": 95,
+    "test": 96
+  },
+  "per_split_boxes": {
+    "train": {
+      "qr": 860,
+      "barcode_1d": 410
+    },
+    "val": {
+      "qr": 250,
+      "barcode_1d": 46
+    },
+    "test": {
+      "qr": 87,
+      "barcode_1d": 43
+    }
+  },
+  "diagnostics": {
+    "box_barcode_1d": 499,
+    "box_qr": 1197
+  },
+  "unknown_class_names": {}
+}

@@ -1,0 +1,16 @@
+# Дефолты для src/train.py (--config configs/train.yaml). CLI-флаги переопределяют.
+# Запуск:  python src/train.py --mode fresh --config configs/train.yaml --device 0
+
+model: yolo11n.pt      # базовые веса для fresh (n/s/m — по GPU Colab)
+data: data.yaml        # 5 классов: qr, barcode_1d, datamatrix, pdf417, aztec
+project: runs          # в Colab подменяется путём на Google Drive
+name: qr_yolo_v1
+
+epochs: 100
+imgsz: 640
+batch: 16              # -1 = авто-подбор по VRAM
+lr0: 0.01              # fresh; для finetune используется lr0_finetune
+lr0_finetune: 0.001
+patience: 50
+seed: 0
+workers: 8

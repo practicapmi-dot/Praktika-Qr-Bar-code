@@ -1,0 +1,20 @@
+# YOLO dataset config (Ultralytics).
+# Пути заполняются после Ph1 (подготовки датасета). Относительны к 'path' или абсолютны.
+#
+# Ожидаемая раскладка (images/ и labels/ зеркальны):
+#   datasets/v1/
+#     images/{train,val,test}/*.jpg
+#     labels/{train,val,test}/*.txt   # YOLO: <class> <xc> <yc> <w> <h> (норм. 0..1)
+
+path: ./datasets/v1     # корень датасета
+train: images/train     # относительно path
+val: images/val
+test: images/test       # опционально
+
+# 5 классов — класс на тип кода (см. CLAUDE.md):
+names:
+  0: qr
+  1: barcode_1d
+  2: datamatrix
+  3: pdf417
+  4: aztec
