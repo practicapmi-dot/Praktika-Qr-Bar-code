@@ -1,0 +1,11 @@
+# data.yaml для datasets/v2 (v1 + OZON + флипы).
+# Пути относительны к этой папке (без 'path') → портативно: работает из любого cwd и в Colab.
+train: images/train
+val: images/val
+test: images/test
+names:
+  0: qr
+  1: barcode_1d
+  2: datamatrix
+  3: pdf417
+  4: aztec

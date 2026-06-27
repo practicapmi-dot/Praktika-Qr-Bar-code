@@ -1,0 +1,11 @@
+# Датасет v2 = v1 + OZON (флип-аугментация). Запуск из корня проекта.
+path: ./datasets/v2
+train: images/train
+val: images/val
+test: images/test
+names:
+  0: qr
+  1: barcode_1d
+  2: datamatrix
+  3: pdf417
+  4: aztec
