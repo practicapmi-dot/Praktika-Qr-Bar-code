@@ -69,10 +69,58 @@ from google.colab import drive; drive.mount('/content/drive')
 ### 3. Инференс на видео + метрики
 ```bash
 .venv/bin/python src/infer_video.py --weights best.pt --source OZONVIDEOS \
-    --out runs/video --conf 0.25 --imgsz 640 --stride 5 --decode
+    --out runs/video --conf 0.25 --imgsz 640 --stride 5 --log-dets
 ```
 Флаги: `--stride N` — обрабатывать каждый N-й кадр; `--decode` — считать decode-rate (zxing-cpp);
 `--no-video` — без аннотированного видео; `--conf` — порог уверенности.
+
+**Фильтр качества (sharp / blurry).** Каждый найденный кроп оценивается на читаемость:
+резкость (дисперсия Лапласиана), контраст (std яркости) и минимальная сторона бокса.
+Кроп «sharp», если `lap_var >= --blur-thr` **и** `contrast >= --min-contrast` **и**
+`min(w,h) >= --min-box`. В аннотированном видео размытые боксы серые с меткой `BLUR`,
+чёткие — в цвете класса. Флаги: `--blur-thr` (дефолт 1500 — откалиброван визуально по
+OZONVIDEOS: ниже штрихи смазаны motion blur'ом), `--min-contrast` (25),
+`--min-box` (24 px), `--only-sharp` — декодировать только sharp, `--log-dets` — писать
+`detections.jsonl` с метриками каждого кропа (для калибровки порога под свои видео).
+В `report.json` — блок `quality` (sharp/blurry counts) и, при `--decode`,
+`decode.by_quality` (decode-rate отдельно по sharp и blurry).
+
+### 4. Уникальные кропы через трекинг (`src/track_crops.py`)
+```bash
+.venv/bin/python src/track_crops.py --weights best.pt --source OZONVIDEOS \
+    --out runs/track_crops --stride 5 --bin-thr 0
+```
+Один физический код = **один кроп за появление в кадре** (ByteTrack: ушёл из кадра →
+вернулся → новый track id → новый кроп). Пока объект трекается, копится его самый резкий
+кадр; когда трек ушёл (`--gone-after`, дефолт 15 обработанных кадров) — лучший кроп
+бинаризуется и коммитится. Размытые треки отбрасываются (`--keep-blurry` — оставить).
+
+Бинаризация `--bin-thr`: фиксированный порог (`pixel > thr → белый`, дефолт 210) или
+**`0` = Otsu (авто-порог) — рекомендуется**: на OZONVIDEOS этикетки темнее 210 и
+фиксированный порог заливает кроп чёрным, Otsu даёт чистые чёрные штрихи на белом.
+
+Выход: `crops.npz` — массив ч/б кропов (uint8, 0/255), `crops_meta.json` — метаданные
+по индексу, `crops/*.png` — просмотр глазами, `*_annot.mp4` — видео с track id.
+Перебор в своём коде:
+```python
+import numpy as np, json
+data = np.load("runs/track_crops/crops.npz")
+crops = [data[k] for k in data.files]                      # список ч/б кропов
+meta = json.load(open("runs/track_crops/crops_meta.json")) # meta[i] ↔ crops[i]
+```
+
+### 5. Полный пайплайн: трекинг → нормализация (`src/pipeline_video.py`)
+```bash
+.venv/bin/python src/pipeline_video.py --weights best.pt --source OZONVIDEOS \
+    --out runs/pipeline --stride 5 --bin-thr 0
+```
+Этап 1 — `track_crops` (всё из раздела 4). Этап 2 — каждый **сырой** кроп из массива
+проходит через `src/barcode_normalizer/` (пакет из `normalizer_05.07.zip`: ориентация
+штрихов → поворот в вертикаль → сегментация зоны → гомография → апскейл) и сохраняется
+в отдельную папку `normalized/` (+ `normalized.npz`, индексы совпадают с `crops/`).
+Нормализатор рассчитан на 1D-коды: по умолчанию выпрямляются только `barcode_1d`
+(`--norm-classes`), остальные классы копируются как есть. Доп. флаги:
+`--target-height` (256), `--norm-gray` (одноканальный выход), `--no-perspective`.
 
 ## Где видео и где результаты
 

@@ -3,6 +3,9 @@ ultralytics>=8.3.0          # YOLO11: detect, resume, finetune, export, муль
 PyYAML>=6.0                 # configs/*.yaml, data.yaml
 # torch/torchvision ставит сам ultralytics под нужную CUDA (в Colab предустановлены).
 
+# === Трекинг (track_crops.py: уникальные кропы через ByteTrack) ===
+lap>=0.5.12                 # linear assignment для ultralytics model.track()
+
 # === Подготовка данных и нормализация (Ph1/Ph3/Ph4) ===
 numpy>=1.24
 opencv-python>=4.8          # cv2: ORB, гомография, warp, threshold (Ph4)
