@@ -66,7 +66,7 @@ def _remove_residual_tilt(warped, cfg):
     if abs(resid) < cfg.second_pass_min_deg or abs(resid) > 25.0:
         return warped
     h0, w0 = warped.shape[:2]
-    rot, _ = persp.rotate_bound(warped, resid)
+    rot, _ = persp.rotate_bound(warped, resid, flags=persp.interp_flag(cfg))
     rad = np.deg2rad(abs(resid))
     mx = int(np.ceil(h0 * np.sin(rad)))
     my = int(np.ceil(w0 * np.sin(rad)))
@@ -80,7 +80,7 @@ def _remove_residual_tilt(warped, cfg):
         return rot
     out_w = max(1, min(int(round(w1 * scale)), cfg.max_width))
     return cv2.resize(rot, (out_w, cfg.target_height),
-                      interpolation=cv2.INTER_LANCZOS4)
+                      interpolation=persp.interp_flag(cfg))
 
 
 def normalize_barcode(image, bbox, cfg: NormalizerConfig = None, debug=False):
@@ -108,8 +108,8 @@ def normalize_barcode(image, bbox, cfg: NormalizerConfig = None, debug=False):
     
     # 3. Поворот к вертикали: полосы -> вертикальные.
     rot_angle = angle - 90.0
-    crop_rot, M = persp.rotate_bound(crop, rot_angle)
-    gray_rot, _ = persp.rotate_bound(gray_clean, rot_angle)
+    crop_rot, M = persp.rotate_bound(crop, rot_angle, flags=persp.interp_flag(cfg))
+    gray_rot, _ = persp.rotate_bound(gray_clean, rot_angle, flags=persp.interp_flag(cfg))
     if debug:
         dbg["crop_rot"] = crop_rot.copy()
         dbg["rot_angle"] = rot_angle

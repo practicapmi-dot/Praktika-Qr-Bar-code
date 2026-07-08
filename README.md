@@ -1,55 +1,164 @@
-# Praktika — детекция и декодирование QR / штрихкодов (YOLO → crop → decode)
+# Praktika — детекция, нормализация и декодирование QR / штрихкодов
 
-Система находит на изображении/видео коды (**QR, 1D-штрихкоды, DataMatrix, PDF417, Aztec**)
-детектором **YOLO11**, вырезает каждый бокс и **декодирует** (`zxing-cpp`). Детектор обучается
-на Google Colab (GPU); инференс — локально (CPU) или в Colab.
+Система находит коды на видео (**QR, 1D-штрихкоды, DataMatrix, PDF417, Aztec**) детектором
+**YOLO11**, трекает каждый физический код (**ByteTrack**), отбирает его самый резкий кадр,
+вырезает кроп, **нормализует** (выпрямление штрихов + перспектива) и **декодирует** (pyzbar /
+zxing-cpp). Детектор обучается на Google Colab (GPU); инференс — локально (CPU).
 
-> Подробный контекст/архитектура — в `CLAUDE.md`, график работ по фазам — в `ROADMAP.md`
-> (оба файла храним локально, в репозиторий не пушим).
+```
+видео → YOLO11 детекция → ByteTrack трекинг → фильтр резкости (Лаплас)
+      → лучший кроп на трек → barcode_normalizer (угол → поворот → сегментация
+      → гомография → апскейл) → [бинаризация] → pyzbar decode → JSON
+```
 
-## Что сделано
+## Как устроен репозиторий
 
-- ✅ **Датасет**: исходный VOC (952 картинки barcode/qr) сконвертирован в YOLO
-  (`datasets/v1`: train 761 / val 95 / test 96). Классы в реале: `qr` + `barcode_1d`.
-- ✅ **Обучение** на Colab: гибкий `train.py` (`fresh` / `resume` / `finetune`),
-  персистентность на Google Drive. Обучена baseline-модель `best.pt` (yolo11n, 5 классов).
-- ✅ **Инференс на видео + метрики**: `src/infer_video.py` (детекция + decode-first).
-- ⏳ В планах (см. `ROADMAP.md`): нормализация кропов (ORB/deskew, Ph4),
-  синтетика для `datamatrix/pdf417/aztec`, отдельные `detect/crop/normalize/decode/pipeline`.
-
-## Какой файл за что отвечает
-
-| Файл | Назначение |
+| Файл / папка | Назначение |
 |------|-----------|
-| `data.yaml` | конфиг датасета YOLO: пути + 5 классов (`qr, barcode_1d, datamatrix, pdf417, aztec`) |
-| `requirements.txt` | зависимости (ultralytics, opencv …; декодеры/синтетика — закомментированы) |
-| `configs/train.yaml` | дефолты гиперпараметров для `train.py` |
+| `src/pipeline_video.py` | **главный скрипт**: видео → уникальные кропы → нормализация → декодирование |
+| `src/track_crops.py` | этап 1 отдельно: YOLO+ByteTrack, один лучший кроп на появление кода в кадре |
+| `src/infer_video.py` | инференс с метриками (детекции, coverage, decode-rate, sharp/blurry) |
+| `src/barcode_normalizer/` | пакет нормализации 1D-кодов (конфиг — `config.py`, все параметры с комментариями) |
 | `src/train.py` | обучение YOLO: режимы `fresh` / `resume` / `finetune` |
-| `src/infer_video.py` | инференс на видео + метрики (детекции, coverage, decode-rate); пишет аннотир. видео и `report.json` |
-| `scripts/prepare_dataset.py` | VOC → YOLO: ремап классов, сплит train/val/test, `dataset_manifest.json` |
-| `scripts/make_colab_zip.sh` | упаковка проекта (+датасет) в zip для Colab |
-| `scripts/bootstrap_colab.sh` | в Colab: распаковка → install → авто-выбор режима → запуск обучения |
-| `sem_17_03_2026.ipynb` | референс-ноутбук ORB (идея для будущей нормализации, Ph4) |
+| `scripts/prepare_dataset.py` | VOC → YOLO: ремап классов, сплит train/val/test, манифест |
+| `scripts/bootstrap_colab.sh` | Colab: установка → авто-выбор режима → запуск обучения |
+| `scripts/make_colab_zip.sh` | упаковка проекта в zip для Colab (альтернатива git clone) |
+| `scripts/synth_bench.py` | синтетический decode-бенчмарк нормализатора (главная метрика качества) |
+| `scripts/eval_normalizer.py` | метрики нормализатора на реальных кропах пайплайна |
+| `scripts/param_search.py` | random search параметров `NormalizerConfig` по decode-rate |
+| `data.yaml` | конфиг датасета YOLO: пути + 5 классов (`qr, barcode_1d, datamatrix, pdf417, aztec`) |
+| `configs/train.yaml` | дефолты гиперпараметров обучения |
+| `datasets/`, `runs/`, `*.pt` | данные / результаты / веса — в `.gitignore`, живут локально |
 
-## Установка (локально)
+## Установка
 
 ```bash
+git clone https://github.com/practicapmi-dot/Praktika-Qr-Bar-code.git
+cd Praktika-Qr-Bar-code
 python3 -m venv .venv
 .venv/bin/pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
-.venv/bin/pip install ultralytics zxing-cpp
-# либо: .venv/bin/pip install -r requirements.txt   (+ zxing-cpp для декода)
+.venv/bin/pip install -r requirements.txt
 ```
 
-## Как запускать
+Для pyzbar нужна системная библиотека: `sudo apt install libzbar0` (на Kali/Ubuntu часто уже есть).
+Веса `best.pt` в git не хранятся — скачай из Colab/Drive и положи в корень репозитория.
 
-### 1. Подготовка датасета (VOC → YOLO)
+## Быстрый старт — полный пайплайн
+
 ```bash
-python scripts/prepare_dataset.py --src datasets/raw/barcode_qr --out datasets/v1 \
+.venv/bin/python src/pipeline_video.py --weights best.pt --source OZONVIDEOS \
+    --out runs/pipeline --stride 5 --bin-thr 0
+```
+
+Результаты в `runs/pipeline/`:
+
+| Артефакт | Что это |
+|----------|---------|
+| `crops/*.png`, `crops.npz` | уникальные бинаризованные ч/б кропы (этап 1) |
+| `crops_meta.json` | по индексу: видео, кадр, track_id, класс, резкость, bbox |
+| `normalized/*.png`, `normalized.npz` | выпрямленные кропы (этап 2); индексы совпадают с `crops/` |
+| `decoded.json` | этап 3: результат pyzbar по каждому кропу (`text: null` = не прочитан) |
+| `*_annot.mp4` | видео с track id (`CAP` = кроп зафиксирован) |
+
+Перебор массивов в своём коде:
+```python
+import numpy as np, json
+data = np.load("runs/pipeline/normalized.npz")
+crops = [data[k] for k in data.files]
+meta = json.load(open("runs/pipeline/crops_meta.json"))   # meta[i] ↔ crops[i]
+```
+
+## Все флаги
+
+### `pipeline_video.py` (включает все флаги `track_crops.py`)
+
+| Флаг | Дефолт | Описание |
+|------|--------|----------|
+| `--weights` | `best.pt` | веса YOLO |
+| `--source` | — | видеофайл или папка с видео |
+| `--out` | `runs/pipeline` | папка результатов |
+| `--conf` | 0.25 | порог уверенности детектора |
+| `--imgsz` | 640 | размер инференса YOLO |
+| `--stride` | 5 | обрабатывать каждый N-й кадр (меньше = надёжнее трекинг, медленнее) |
+| `--pad` | 0.10 | запас вокруг BB при кропе (+10% с каждой стороны) |
+| `--max-frames` | 0 | лимит обработанных кадров (0 = все) |
+| `--bin-thr` | 210 | бинаризация кропов этапа 1: фикс. порог; **`0` = Otsu (рекомендуется)** |
+| `--blur-thr` | 1500 | порог резкости (дисперсия Лапласиана); ниже — blurry |
+| `--min-contrast` | 25 | мин. контраст кропа (std яркости) |
+| `--min-box` | 24 | мин. сторона бокса, px |
+| `--gone-after` | 15 | через сколько кадров без трека коммитить его кроп |
+| `--keep-blurry` | выкл | не отбрасывать треки, не прошедшие фильтр резкости |
+| `--no-video` | выкл | не писать аннотированное видео |
+| `--annot-width` | 1280 | ширина аннотированного видео |
+| `--device` | `cpu` | `cpu` / `0` (GPU) |
+| `--target-height` | 256 | высота выпрямленного кода после нормализации |
+| `--norm-classes` | `barcode_1d` | какие классы нормализовать (через запятую) |
+| `--norm-gray` | выкл | нормализованный выход одноканальный |
+| `--norm-binary` | **выкл** | режим с бинаризацией финала (ч/б 0/255 по Otsu) |
+| `--no-perspective` | выкл | отключить коррекцию перспективы |
+| `--decode-scales` | `1,2,3` | масштабы попыток декодирования (pyzbar чувствителен к размеру штриха) |
+
+**Два режима финала:** по умолчанию `normalized/` — **без бинаризации** (декодеры бинаризуют
+сами, адаптивно — decode-rate выше; жёсткий глобальный порог терял читаемые коды).
+`--norm-binary` — финал строго ч/б 0/255 (для хранения/попиксельной обработки); при
+декодировании автоматически используется fallback на небинаризованную версию.
+
+### `infer_video.py` (метрики детекции)
+
+Те же базовые флаги + `--decode` (считать decode-rate zxing-ом), `--only-sharp` (декодировать
+только резкие), `--log-dets` (писать `detections.jsonl` с `lap_var`/`contrast` каждого кропа —
+для калибровки `--blur-thr` под свои видео).
+
+### Бенчмарки нормализатора
+
+```bash
+.venv/bin/python scripts/synth_bench.py --cases 120 --variants all   # синтетика: decode-rate
+.venv/bin/python scripts/eval_normalizer.py                          # реальные кропы
+.venv/bin/python scripts/param_search.py --n 64 --cases 100 --workers 8   # поиск параметров
+```
+
+`param_search` пишет `runs/param_search/results.jsonl` (все конфиги) и `best_config.json`
+(лучший, валидирован на втором сиде). Найденные значения уже вшиты в
+`src/barcode_normalizer/config.py`.
+
+## Обучение модели
+
+### Подготовка датасета
+
+```bash
+.venv/bin/python scripts/prepare_dataset.py --src datasets/raw/barcode_qr --out datasets/v1 \
     --train 0.8 --val 0.1 --test 0.1 --seed 0 --clean
 ```
+Флаги: `--version-tag` (тег в манифест), `--no-dedup` (не выкидывать дубли), `--symlink`
+(симлинки вместо копий), `--clean` (очистить `--out`).
 
-### 2. Обучение
-**Colab (рекомендуется — бесплатный GPU):**
+### Три режима `train.py`
+
+| Режим | Когда | Что делает |
+|-------|-------|-----------|
+| `fresh` | первое обучение | старт с COCO-весов (`--model yolo11n.pt`) |
+| `resume` | Colab отвалился / прервал | продолжает run с `last.pt` **вместе с состоянием оптимизатора** — с той же эпохи |
+| `finetune` | пополнил датасет / новый домен | новый run от `best.pt` с пониженным LR |
+
+```bash
+# первое обучение
+.venv/bin/python src/train.py --mode fresh --data data.yaml --model yolo11n.pt \
+    --epochs 100 --imgsz 640 --batch 16 --name qr_yolo_v1
+
+# продолжить прерванное (указать last.pt прерванного run'а)
+.venv/bin/python src/train.py --mode resume --resume-path runs/qr_yolo_v1/weights/last.pt
+
+# дообучение на новых данных (напр. складские кадры) с меньшим LR
+.venv/bin/python src/train.py --mode finetune --weights best.pt --data datasets/v2/data.yaml \
+    --epochs 50 --lr0 0.001 --name qr_yolo_v2_ft
+```
+
+Остальные флаги: `--config` (свой yaml с дефолтами), `--project` (куда писать runs),
+`--patience` (early stopping), `--seed`, `--workers`, `--device` (`0`/`cpu`/`0,1`),
+`--batch -1` (автоподбор).
+
+### Обучение в Colab (рекомендуется — бесплатный GPU)
+
 ```python
 !git clone https://github.com/practicapmi-dot/Praktika-Qr-Bar-code.git
 %cd Praktika-Qr-Bar-code
@@ -57,109 +166,39 @@ from google.colab import drive; drive.mount('/content/drive')
 !bash scripts/bootstrap_colab.sh --work /content/Praktika-Qr-Bar-code \
     --drive-runs /content/drive/MyDrive/praktikum/runs --name qr_yolo_v1 --mode auto --epochs 100
 ```
-Отвалился Colab → повтори ячейку: `--mode auto` сам сделает `resume` с `last.pt` на Drive.
-Дообучение на дополненном датасете — тот же скрипт с `--mode finetune`.
 
-**Локально:**
-```bash
-.venv/bin/python src/train.py --mode fresh --data data.yaml --model yolo11n.pt \
-    --epochs 100 --imgsz 640 --batch 16 --name qr_yolo_v1
-```
+Ключевое — персистентность через Drive: чекпойнты пишутся туда каждую эпоху.
+**Colab отвалился → просто повтори ячейку**: `--mode auto` сам найдёт `last.pt` на Drive и
+сделает `resume`; если run завершён и есть новые данные — запускай с `--mode finetune`.
+Флаги bootstrap: `--zip` (путь к архиву проекта вместо clone), `--work`, `--drive-runs`,
+`--name`, `--mode {auto,fresh,resume,finetune}`, `--epochs`, `--model`.
 
-### 3. Инференс на видео + метрики
-```bash
-.venv/bin/python src/infer_video.py --weights best.pt --source OZONVIDEOS \
-    --out runs/video --conf 0.25 --imgsz 640 --stride 5 --log-dets
-```
-Флаги: `--stride N` — обрабатывать каждый N-й кадр; `--decode` — считать decode-rate (zxing-cpp);
-`--no-video` — без аннотированного видео; `--conf` — порог уверенности.
+Как пополнять датасет для finetune: добавить новые изображения+разметку в `datasets/raw/...`,
+прогнать `prepare_dataset.py --out datasets/v2 --version-tag v2`, обучить `--mode finetune
+--data datasets/v2/data.yaml`. Манифест (`dataset_manifest.json`) фиксирует состав каждой версии.
 
-**Фильтр качества (sharp / blurry).** Каждый найденный кроп оценивается на читаемость:
-резкость (дисперсия Лапласиана), контраст (std яркости) и минимальная сторона бокса.
-Кроп «sharp», если `lap_var >= --blur-thr` **и** `contrast >= --min-contrast` **и**
-`min(w,h) >= --min-box`. В аннотированном видео размытые боксы серые с меткой `BLUR`,
-чёткие — в цвете класса. Флаги: `--blur-thr` (дефолт 1500 — откалиброван визуально по
-OZONVIDEOS: ниже штрихи смазаны motion blur'ом), `--min-contrast` (25),
-`--min-box` (24 px), `--only-sharp` — декодировать только sharp, `--log-dets` — писать
-`detections.jsonl` с метриками каждого кропа (для калибровки порога под свои видео).
-В `report.json` — блок `quality` (sharp/blurry counts) и, при `--decode`,
-`decode.by_quality` (decode-rate отдельно по sharp и blurry).
+## Результаты на OZONVIDEOS (3 ролика 4K @ 20fps, склад)
 
-### 4. Уникальные кропы через трекинг (`src/track_crops.py`)
-```bash
-.venv/bin/python src/track_crops.py --weights best.pt --source OZONVIDEOS \
-    --out runs/track_crops --stride 5 --bin-thr 0
-```
-Один физический код = **один кроп за появление в кадре** (ByteTrack: ушёл из кадра →
-вернулся → новый track id → новый кроп). Пока объект трекается, копится его самый резкий
-кадр; когда трек ушёл (`--gone-after`, дефолт 15 обработанных кадров) — лучший кроп
-бинаризуется и коммитится. Размытые треки отбрасываются (`--keep-blurry` — оставить).
+**Пайплайн (полный):** 753 кадра → 162 трека → **124 уникальных кропа** (38 отброшено как
+размытые) → нормализовано 124/124 → **декодировано pyzbar: 1/124** (`246582`).
 
-Бинаризация `--bin-thr`: фиксированный порог (`pixel > thr → белый`, дефолт 210) или
-**`0` = Otsu (авто-порог) — рекомендуется**: на OZONVIDEOS этикетки темнее 210 и
-фиксированный порог заливает кроп чёрным, Otsu даёт чистые чёрные штрихи на белом.
+**Нормализатор** (после улучшений + подбора параметров):
 
-Выход: `crops.npz` — массив ч/б кропов (uint8, 0/255), `crops_meta.json` — метаданные
-по индексу, `crops/*.png` — просмотр глазами, `*_annot.mp4` — видео с track id.
-Перебор в своём коде:
-```python
-import numpy as np, json
-data = np.load("runs/track_crops/crops.npz")
-crops = [data[k] for k in data.files]                      # список ч/б кропов
-meta = json.load(open("runs/track_crops/crops_meta.json")) # meta[i] ↔ crops[i]
-```
+| Метрика | Оригинал | Улучшенный |
+|---------|----------|-----------|
+| Синтетика, decode-rate (120 кейсов) | 45.8% | **69.2%** |
+| Реальные кропы, вертикальность штрихов | 0.829 | **0.882** |
 
-### 5. Полный пайплайн: трекинг → нормализация (`src/pipeline_video.py`)
-```bash
-.venv/bin/python src/pipeline_video.py --weights best.pt --source OZONVIDEOS \
-    --out runs/pipeline --stride 5 --bin-thr 0
-```
-Этап 1 — `track_crops` (всё из раздела 4). Этап 2 — каждый **сырой** кроп из массива
-проходит через `src/barcode_normalizer/` (пакет из `normalizer_05.07.zip`: ориентация
-штрихов → поворот в вертикаль → сегментация зоны → гомография → апскейл) и сохраняется
-в отдельную папку `normalized/` (+ `normalized.npz`, индексы совпадают с `crops/`).
-Нормализатор рассчитан на 1D-коды: по умолчанию выпрямляются только `barcode_1d`
-(`--norm-classes`), остальные классы копируются как есть. Доп. флаги:
-`--target-height` (256), `--norm-gray` (одноканальный выход), `--no-perspective`.
+Интерполяция проверена бенчем: Lanczos лучший (linear −20пп, cubic −3пп decode).
 
-## Где видео и где результаты
-
-- **Входные видео:** `OZONVIDEOS/` — 3 ролика Ozon (4K @ 20fps, ~62 c). **Проприетарные →
-  в git НЕ коммитятся** (`.gitignore`), лежат только локально.
-- **Веса:** `best.pt` в корне (скачаны из Colab; `*.pt` в `.gitignore`).
-- **Результаты инференса:** `runs/video/` — аннотированные `*_annot.mp4` + `report.json` (все метрики).
-  `runs/` в `.gitignore` (генерируется, хранится локально).
-
-## Метрики — baseline `best.pt` на OZONVIDEOS
-
-Прогон: `conf 0.25`, `imgsz 640`, `stride 5` (≈4 fps), decode-first (zxing-cpp по сырому кропу).
-
-| Видео | Кадров | Детекций (qr / barcode_1d) | Coverage | Decoded |
-|-------|--------|----------------------------|----------|---------|
-| палет 1 | 251 | 607 (599 / 8) | 94.4% | 0 / 607 |
-| палет 2 | 251 | 3976 (3976 / 0) | 99.2% | 0 / 3976 |
-| стол | 251 | 77 (75 / 2) | 19.9% | 0 / 77 |
-| **ИТОГО** | **753** | **4660 (4650 / 10)** | **71.2%** | **0 / 4660 (0%)** |
-
-Средняя уверенность: `qr` 0.527, `barcode_1d` 0.292.
-
-> На сыром видео нет ground-truth разметки, поэтому mAP/precision/recall не считаются —
-> приведены операционные метрики.
-
-**Интерпретация (честно):** детектор **срабатывает** и садится на транспортные этикетки коробок,
-но **end-to-end decode = 0%**. Причины: (1) домен-сдвиг — обучение шло на ручных фото товаров,
-а тут склад сверху; (2) модель почти всё зовёт `qr` и переусердствует (видео-2: ~16 боксов/кадр),
-боксы рыхлые/наложенные; (3) коды мелкие на расстоянии даже в 4K; (4) **стадия нормализации
-(Ph4) ещё не реализована** — декод идёт по сырому кропу. Сам декодер рабочий
-(zxing декодит 22/50 датасетных картинок).
-
-**Что поднимет decode-rate:** дообучение на складских данных (`--mode finetune`); нормализация
-кропа (upscale + grayscale + threshold + deskew + повороты 0/90/180/270); калибровка классов
-(на складе в основном 1D/DataMatrix, а не `qr`).
+**Почему decode на реальном видео ~0:** коды в кадре ~50 px по меньшей стороне — один штрих
+меньше пикселя, это ниже физического предела любого декодера (синтетика доказывает, что сама
+цепочка декодирует ~70%, когда пикселей хватает). Решение — камера ближе/зум к зоне
+сканирования; софтом это не лечится.
 
 ## Датасет
 
 - `datasets/raw/barcode_qr/` — исходный VOC (952 `jpg` + `xml`).
-- `datasets/v1/` — YOLO-формат (`images/` и `labels/` × `train/val/test`) + `dataset_manifest.json`.
-- Классы (5): `qr, barcode_1d, datamatrix, pdf417, aztec`. Сейчас в данных только `qr` и
-  `barcode_1d`; остальные три — под синтетику (следующий шаг).
+- `datasets/v1/` — YOLO-формат + `dataset_manifest.json`; `datasets/v2/` — v1 + OZON-кадры + аугментации.
+- Классы (5): `qr, barcode_1d, datamatrix, pdf417, aztec`. В данных пока `qr` и `barcode_1d`;
+  остальные — под синтетику (`ROADMAP.md`).

@@ -57,6 +57,9 @@ def build_parser():
     p.add_argument("--conf", type=float, default=0.25)
     p.add_argument("--imgsz", type=int, default=640)
     p.add_argument("--stride", type=int, default=5, help="обрабатывать каждый N-й кадр")
+    p.add_argument("--pad", type=float, default=0.10,
+                   help="запас вокруг BB при кропе, доля от размера бокса "
+                        "(0.10 = +10%% с каждой стороны)")
     p.add_argument("--max-frames", type=int, default=0, help="лимит обработанных кадров (0=все)")
     p.add_argument("--bin-thr", type=int, default=210,
                    help="порог бинаризации: >thr → белый(255), иначе чёрный(0); <=0 → Otsu")
@@ -79,11 +82,11 @@ def parse_args():
 
 
 def binarize(crop_bgr, thr=210):
-    """BGR-кроп → ч/б uint8 (0/255): pixel > thr → 255 (фон), иначе 0 (штрих).
+    """BGR/gray-кроп → ч/б uint8 (0/255): pixel > thr → 255 (фон), иначе 0 (штрих).
 
     thr <= 0 → авто-порог Otsu (устойчивее при неравномерной освещённости).
     """
-    g = cv2.cvtColor(crop_bgr, cv2.COLOR_BGR2GRAY)
+    g = crop_bgr if crop_bgr.ndim == 2 else cv2.cvtColor(crop_bgr, cv2.COLOR_BGR2GRAY)
     if thr <= 0:
         _, bw = cv2.threshold(g, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
     else:
@@ -163,7 +166,7 @@ def collect_crops(video_path, a, model=None):
             tid = int(b.id); cid = int(b.cls); xyxy = b.xyxy[0].tolist()
             seen.add(tid)
             if tid not in committed:
-                crop = extract_crop(frame, xyxy)
+                crop = extract_crop(frame, xyxy, pad=a.pad)
                 if crop is not None:
                     lap, contrast = crop_sharpness(crop)
                     bw_, bh_ = xyxy[2] - xyxy[0], xyxy[3] - xyxy[1]

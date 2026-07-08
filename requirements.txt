@@ -12,9 +12,9 @@ opencv-python>=4.8          # cv2: ORB, гомография, warp, threshold (P
 Pillow>=10.0
 # prepare_dataset.py зависимостей НЕ требует (чистый stdlib).
 
-# === Декодирование (Ph5) — раскомментировать при работе над декодером ===
-# zxing-cpp>=2.2.0          # основной декодер всех 5 типов
-# pyzbar>=0.1.9             # fallback QR/1D   (нужен системный libzbar0)
+# === Декодирование ===
+zxing-cpp>=2.2.0            # decode-метрики в infer_video.py и бенчмарках
+pyzbar>=0.1.9               # этап 3 pipeline_video.py (нужен системный libzbar0)
 # pylibdmtx>=0.1.10         # fallback DataMatrix (нужен системный libdmtx0)
 
 # === Синтетика (Ph1, генерация недостающих типов) ===

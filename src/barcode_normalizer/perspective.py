@@ -260,11 +260,18 @@ def build_target_size(corners: np.ndarray, cfg: NormalizerConfig):
     return out_w, out_h
 
 
+def interp_flag(cfg):
+    """cv2-флаг интерполяции из cfg.interpolation (linear|cubic|lanczos)."""
+    return {"linear": cv2.INTER_LINEAR,
+            "cubic": cv2.INTER_CUBIC,
+            "lanczos": cv2.INTER_LANCZOS4}.get(cfg.interpolation,
+                                               cv2.INTER_LINEAR)
+
+
 def warp_to_rect(img, corners, out_w, out_h, cfg):
     src = order_corners(corners)
     dst = np.array([[0, 0], [out_w - 1, 0],
                     [out_w - 1, out_h - 1], [0, out_h - 1]], dtype=np.float32)
     H = cv2.getPerspectiveTransform(src, dst)
-    interp = cv2.INTER_LANCZOS4 if cfg.interpolation == "lanczos" else cv2.INTER_CUBIC
-    return cv2.warpPerspective(img, H, (out_w, out_h), flags=interp,
+    return cv2.warpPerspective(img, H, (out_w, out_h), flags=interp_flag(cfg),
                                borderMode=cv2.BORDER_REPLICATE)
